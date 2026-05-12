@@ -1,6 +1,6 @@
 {
     "name": "Field Diff Tracking",
-    "version": "19.0.1.0.0",
+    "version": "19.0.1.0.1",
     "summary": "Track diffs for text, char, and HTML fields",
     "sequence": 0,
     "description": """The Field Diff Tracking module provides a mixin for Odoo models to track and display differences in text, char, and HTML fields. This module enhances Odoo's native change tracking by providing a more detailed and visually appealing diff view in the chatter.""",

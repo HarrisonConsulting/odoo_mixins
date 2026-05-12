@@ -1,6 +1,6 @@
 {
     "name": "Environment Config Mixin",
-    "version": "19.0.1.0.0",
+    "version": "19.0.1.0.1",
     "summary": "ENV var + ir.config_parameter config mixin",
     "description": """Provides an AbstractModel mixin for reading configuration
 with environment variable priority over ir.config_parameter.
