@@ -32,7 +32,7 @@ class EnvConfigMixin(models.AbstractModel):
 
     # Override in consuming models to map ir.config_parameter keys
     # to custom ENV var names (for standard service variables).
-    # Example: {'openai.api_key': 'OPENAI_API_KEY'}
+    # Example: {'modelnexus.api_key': 'OPENAI_API_KEY'}
     _env_config_map = {}
 
     @api.model
