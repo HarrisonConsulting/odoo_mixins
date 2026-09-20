@@ -77,10 +77,10 @@
                         </div>
                     </group>
                     <group string="Body">
-                        <field name="body" nolabel="1"/>
+                        <field name="body" nolabel="1" colspan="2"/>
                     </group>
                     <group string="Ink" invisible="not ink">
-                        <field name="ink" nolabel="1" widget="json"/>
+                        <field name="ink" nolabel="1" colspan="2" widget="json"/>
                     </group>
                     <field name="child_ids" nolabel="1" readonly="1">
                         <list string="Replies">
@@ -128,6 +128,7 @@
 
     <record id="action_markup_mark" model="ir.actions.act_window">
         <field name="name">Marks</field>
+        <field name="path">markup-marks</field>
         <field name="res_model">markup.mark</field>
         <field name="view_mode">list,form</field>
         <field name="search_view_id" ref="view_markup_mark_search"/>
