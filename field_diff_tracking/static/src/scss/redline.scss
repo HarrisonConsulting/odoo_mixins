@@ -1,0 +1,39 @@
+// Redlines read like an editor's marks: written-in text is underlined, struck
+// text is struck through. Colour reinforces the marks and is never the only
+// signal, so the redline survives print, email and colour-blind reading.
+.o_redline {
+    margin: 0 0 .5rem;
+
+    p {
+        margin: 0 0 .25rem;
+    }
+
+    ins {
+        text-decoration: underline;
+        text-decoration-thickness: .08em;
+        text-underline-offset: .15em;
+        background-color: var(--gdo-status-success-bg, rgba(26, 127, 55, .14));
+        color: inherit;
+    }
+
+    del {
+        text-decoration: line-through;
+        text-decoration-thickness: .08em;
+        background-color: var(--gdo-status-danger-bg, rgba(207, 34, 46, .12));
+        color: inherit;
+    }
+
+    .o_redline_skip {
+        font-style: italic;
+        opacity: .65;
+    }
+}
+
+pre.o_redline_code {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.o_redline_field {
+    margin: .5rem 0 .25rem;
+}
