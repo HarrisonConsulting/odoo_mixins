@@ -47,6 +47,7 @@ class MarkupTransport(http.Controller):
             "text": record.markup_text(field_name) if field_name else None,
             "can_comment": record.markup_can_comment(),
             "can_resolve": record.has_access("write"),
+            "can_ask_agent": record.markup_can_ask_agent(),
         }
 
     @http.route("/markup/add", type="jsonrpc", auth="user")
@@ -57,6 +58,17 @@ class MarkupTransport(http.Controller):
             return {"error": "not_found"}
         try:
             return {"mark": record.markup_add(field_name, int(start), int(end), values or {})}
+        except (AccessError, UserError) as error:
+            return {"error": "refused", "message": str(error)}
+
+    @http.route("/markup/ask", type="jsonrpc", auth="user")
+    def ask(self, model, res_id, field_name, start, end, values=None):
+        """Put a passage to an agent, where the estate grants that."""
+        record = _markable(model, res_id)
+        if record is None:
+            return {"error": "not_found"}
+        try:
+            return {"mark": record.markup_ask_agent(field_name, int(start), int(end), values or {})}
         except (AccessError, UserError) as error:
             return {"error": "refused", "message": str(error)}
 

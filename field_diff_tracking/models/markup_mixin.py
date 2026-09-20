@@ -5,6 +5,7 @@ from odoo.exceptions import AccessError, UserError
 
 from ..tools import anchor
 from ..tools.redline import html_text
+from ..tools.splice import splice_html
 
 
 class MarkupMixin(models.AbstractModel):
@@ -171,26 +172,82 @@ class MarkupMixin(models.AbstractModel):
     def _markup_apply(self, mark, body):
         """Write an accepted edit into the text, and supersede what it overtook.
 
-        The base implementation splices the field. A host that keeps versions
-        overrides this to mint one instead, so the change is recorded rather
-        than absorbed — which is the whole reason marks never write directly.
+        Text is spliced by offset. Html is spliced **in the tree**, so the words
+        the mark quoted are replaced where they sit and every tag around them
+        survives — see :func:`tools.splice.splice_html`. Both are the same edit
+        expressed against the same readable text, which is why one method can
+        own both.
+
+        A host that keeps versions overrides this to mint one around the write,
+        so the change is recorded rather than absorbed — which is the whole
+        reason marks never write directly.
         """
         self.ensure_one()
         field_name = mark.field_name
-        if self._fields[field_name].type == "html":
-            raise UserError(
-                "Accepting an edit on an Html field needs a host that can rewrite "
-                "its blocks; splicing the readable text would discard the markup."
-            )
-        text = self.markup_text(field_name)
         start, end = mark.start_pos, mark.end_pos
-        self.write({field_name: text[:start] + (body or "") + text[end:]})
+        self.write({field_name: self._markup_edited(field_name, start, end, body or "")})
         overlapped = self.env["markup.mark"].sudo().search([
             ("res_model", "=", self._name), ("res_id", "=", self.id),
             ("field_name", "=", field_name), ("state", "=", "open"),
             ("id", "!=", mark.id), ("start_pos", "<", end), ("end_pos", ">", start),
         ])
         overlapped.write({"state": "superseded", "superseded_by_id": mark.id})
+
+    def _markup_edited(self, field_name, start, end, body):
+        """The field's new value with ``[start, end)`` of its readable text replaced.
+
+        Computed without writing, so a host can put it in a version, compare it,
+        or show it before it commits to it.
+        """
+        self.ensure_one()
+        self._markup_check_field(field_name)
+        if self._fields[field_name].type == "html":
+            try:
+                return splice_html(self[field_name], start, end, body)
+            except ValueError as error:
+                raise UserError(str(error)) from error
+        text = self.markup_text(field_name)
+        return text[:start] + body + text[end:]
+
+    # ── asking an agent ──────────────────────────────────────────────────────
+    def _markup_can_ask_agent(self):
+        """Whether the caller may put a passage to an agent.
+
+        False here, and deliberately so: this module knows nothing about agents,
+        and a surface that offered the control anyway would be promising a
+        capability the estate might not have granted. The module that owns the
+        agents answers this, once, for every host at once.
+        """
+        return False
+
+    def markup_can_ask_agent(self):
+        self.ensure_one()
+        try:
+            return bool(self._markup_can_ask_agent())
+        except AccessError:
+            return False
+
+    def markup_ask_agent(self, field_name, start, end, values=None):
+        """Mark a passage as a question for an agent.
+
+        The refusal is here, in the calling path, rather than in whatever
+        renders the button — a control that is merely hidden is a control that
+        is still there.
+        """
+        self.ensure_one()
+        if not self._markup_can_ask_agent():
+            raise AccessError(
+                "Putting a passage to an agent is not granted on this record."
+            )
+        values = dict(values or {})
+        values["motivation"] = "questioning"
+        mark = self.markup_add(field_name, start, end, values)
+        self._markup_agent_asked(self.env["markup.mark"].sudo().browse(mark["id"]))
+        return mark
+
+    def _markup_agent_asked(self, mark):
+        """Tell whoever answers that a passage is waiting. Nothing, by default."""
+        return False
 
     # ── keeping marks on the passage they were made on ───────────────────────
     def markup_reanchor(self, field_names=None):

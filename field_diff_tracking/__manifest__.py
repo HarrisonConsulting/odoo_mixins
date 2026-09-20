@@ -1,6 +1,6 @@
 {
     "name": "Field Diff Tracking",
-    "version": "19.0.2.0.0",
+    "version": "19.0.2.1.0",
     "summary": "Redlines in the chatter, and marks on the passages people argue with",
     "sequence": 0,
     "description": """
@@ -28,9 +28,16 @@ same one.
     "depends": ["base", "mail", "web"],
     "data": [
         "security/ir.model.access.csv",
+        "views/markup_mark_views.xml",
         "views/res_users_views.xml",
     ],
     "assets": {
+        # Redlines are this module's own rendering and ship with it. The marks
+        # SURFACE is not here: it is the gdo-design MarkupApp, mounted by
+        # modelnexus_document, because the same app has to render in a terminal
+        # and in three separate Odoo bundles and could not do that as Odoo
+        # JavaScript. What this module owns is the model, the routes and the
+        # anchoring — everything a surface has to agree with.
         "web.assets_backend": ["field_diff_tracking/static/src/scss/redline.scss"],
         "web.assets_frontend": ["field_diff_tracking/static/src/scss/redline.scss"],
     },
