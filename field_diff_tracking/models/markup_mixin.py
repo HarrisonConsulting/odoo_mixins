@@ -147,23 +147,20 @@ class MarkupMixin(models.AbstractModel):
             "res_id": self.id,
             "field_name": field_name,
             "version_ref": self._markup_version_ref(field_name),
+            # Said here rather than left to the field's default. `sudo()` bypasses
+            # access checks without changing who the user is, so the default names
+            # the right partner today — but authorship is the one column a reader
+            # trusts, and it is written where the rule can be seen instead of
+            # inherited from a default a host is free to redefine. The caller is a
+            # person: a mark an agent composed is re-signed afterwards, by the one
+            # path entitled to claim it.
             "author_id": self.env.user.partner_id.id,
-            "author_kind": self._markup_author_kind(),
+            "author_kind": "human",
             "state": "open",
             **selector,
         }
         mark = self.env["markup.mark"].sudo().create(mark_values)
         return mark.to_dict()[0]
-
-    def _markup_author_kind(self):
-        """Who is speaking. A human unless a host that knows better says otherwise.
-
-        Creation runs as the superuser so a mark can be written on a record the
-        author may read but not write, which means authorship cannot come from
-        the field default — it would name the superuser. It is recorded here,
-        from the real caller, or it is not provenance at all.
-        """
-        return "human"
 
     def markup_resolve(self, mark_id, state, body=None):
         """Accept or reject a mark. Accepting an edit applies it; rejecting never does."""
