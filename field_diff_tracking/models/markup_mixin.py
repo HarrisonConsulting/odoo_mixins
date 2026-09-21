@@ -7,6 +7,10 @@ from ..tools import anchor
 from ..tools.redline import html_text
 from ..tools.splice import splice_html
 
+# The only keys a caller may set on a mark: what it wants to say, never what
+# the mark points at or who said it.
+MARK_CLIENT_FIELDS = ("motivation", "body", "editorial_level", "ink", "gesture")
+
 
 class MarkupMixin(models.AbstractModel):
     """Let a record's text be marked: highlighted, noted, questioned, edited.
@@ -134,15 +138,32 @@ class MarkupMixin(models.AbstractModel):
                 )
             selector = anchor.selector(text, placed[0], placed[1])
         mark_values = {
+            # What the caller may say is its own content, and only that. Everything
+            # naming a record, an author, a state or a parent is the server's, and
+            # is applied AFTER the caller's keys so a key added to the wrong dict
+            # later cannot quietly become client-writable.
+            **{key: values[key] for key in MARK_CLIENT_FIELDS if key in values},
             "res_model": self._name,
             "res_id": self.id,
             "field_name": field_name,
             "version_ref": self._markup_version_ref(field_name),
+            "author_id": self.env.user.partner_id.id,
+            "author_kind": self._markup_author_kind(),
+            "state": "open",
             **selector,
-            **values,
         }
         mark = self.env["markup.mark"].sudo().create(mark_values)
         return mark.to_dict()[0]
+
+    def _markup_author_kind(self):
+        """Who is speaking. A human unless a host that knows better says otherwise.
+
+        Creation runs as the superuser so a mark can be written on a record the
+        author may read but not write, which means authorship cannot come from
+        the field default — it would name the superuser. It is recorded here,
+        from the real caller, or it is not provenance at all.
+        """
+        return "human"
 
     def markup_resolve(self, mark_id, state, body=None):
         """Accept or reject a mark. Accepting an edit applies it; rejecting never does."""
