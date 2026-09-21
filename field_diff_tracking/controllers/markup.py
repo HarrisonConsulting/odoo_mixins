@@ -42,13 +42,16 @@ class MarkupTransport(http.Controller):
         record = _markable(model, res_id)
         if record is None:
             return {"error": "not_found"}
-        return {
-            "marks": record.markup_marks(field_name, tuple(states or ())),
-            "text": record.markup_text(field_name) if field_name else None,
-            "can_comment": record.markup_can_comment(),
-            "can_resolve": record.has_access("write"),
-            "can_ask_agent": record.markup_can_ask_agent(),
-        }
+        try:
+            return {
+                "marks": record.markup_marks(field_name, tuple(states or ())),
+                "text": record.markup_text(field_name) if field_name else None,
+                "can_comment": record.markup_can_comment(),
+                "can_resolve": record.has_access("write"),
+                "can_ask_agent": record.markup_can_ask_agent(),
+            }
+        except (AccessError, UserError) as error:
+            return {"error": "refused", "message": str(error)}
 
     @http.route("/markup/add", type="jsonrpc", auth="user")
     def add(self, model, res_id, field_name, start, end, values=None):
