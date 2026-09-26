@@ -80,6 +80,19 @@ class MarkupMixin(models.AbstractModel):
         """Identity of the version marks are being taken against, if any."""
         return False
 
+    def _markup_check_host_read(self):
+        """Whether the caller may reach this record's marks at all.
+
+        Defaults to plain ``check_access("read")`` — the same question every
+        other caller's read already answers. A host admits a wider audience
+        (a share grant, a token) by overriding ONLY this method, so that
+        widening is scoped to the marks transport and never leaks into
+        ``read()``, ``web_read``, related-field traversal, or any other RPC
+        path a plain ``check_access``/``_check_access`` override would also
+        have widened.
+        """
+        self.check_access("read")
+
     def _markup_can_comment(self, field_name=None):
         """Whether the caller may add marks. Read access, unless a host says more.
 
@@ -89,7 +102,7 @@ class MarkupMixin(models.AbstractModel):
         when the caller names one, lets a host refuse a passage-specific field
         even where the record as a whole is readable.
         """
-        self.check_access("read")
+        self._markup_check_host_read()
         if field_name and not self._has_field_access(self._fields[field_name], "read"):
             raise AccessError(
                 f"{self._name}.{field_name} is not readable to you, so it cannot be marked."
@@ -129,7 +142,7 @@ class MarkupMixin(models.AbstractModel):
     def markup_marks(self, field_name=None, states=("open",)):
         """Marks on this record, for whoever may read the record itself."""
         self.ensure_one()
-        self.check_access("read")
+        self._markup_check_host_read()
         domain = [("res_model", "=", self._name), ("res_id", "=", self.id)]
         if field_name:
             self._markup_check_field(field_name)

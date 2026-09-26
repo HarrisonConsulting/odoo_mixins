@@ -28,7 +28,7 @@ def _markable(model_name, res_id):
         return None
     record = request.env[model_name].browse(int(res_id))
     try:
-        record.check_access("read")
+        record._markup_check_host_read()
     except (AccessError, MissingError, ValueError):
         return None
     return record if record.exists() else None
