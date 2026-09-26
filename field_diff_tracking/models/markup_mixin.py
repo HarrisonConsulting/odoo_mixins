@@ -9,7 +9,7 @@ from ..tools.splice import splice_html
 
 # The only keys a caller may set on a mark: what it wants to say, never what
 # the mark points at or who said it.
-MARK_CLIENT_FIELDS = ("motivation", "body", "editorial_level", "ink", "gesture")
+MARK_CLIENT_FIELDS = ("motivation", "body", "editorial_level", "ink", "gesture", "score")
 
 
 class MarkupMixin(models.AbstractModel):
