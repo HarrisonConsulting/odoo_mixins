@@ -80,21 +80,48 @@ class MarkupMixin(models.AbstractModel):
         """Identity of the version marks are being taken against, if any."""
         return False
 
-    def _markup_can_comment(self):
+    def _markup_can_comment(self, field_name=None):
         """Whether the caller may add marks. Read access, unless a host says more.
 
         A suggestion changes nothing until someone with write accepts it, so
         commenting is deliberately cheaper than editing. Hosts with a sharing
-        ladder override this to require their own comment grant.
+        ladder override this to require their own comment grant. ``field_name``,
+        when the caller names one, lets a host refuse a passage-specific field
+        even where the record as a whole is readable.
         """
         self.check_access("read")
+        if field_name and not self._has_field_access(self._fields[field_name], "read"):
+            raise AccessError(
+                f"{self._name}.{field_name} is not readable to you, so it cannot be marked."
+            )
         return True
 
-    def markup_can_comment(self):
+    def markup_can_comment(self, field_name=None):
         """The same gate asked as a question, for a surface deciding what to offer."""
         self.ensure_one()
         try:
-            return bool(self._markup_can_comment())
+            return bool(self._markup_can_comment(field_name))
+        except AccessError:
+            return False
+
+    def _markup_can_resolve(self, field_name=None):
+        """Whether the caller may accept or reject a mark. Write access, unless a
+        host says more. ``field_name`` lets a host refuse resolving a mark on a
+        field it does not let this caller write.
+        """
+        self.check_access("write")
+        if field_name and not self._has_field_access(self._fields[field_name], "write"):
+            raise AccessError(
+                f"{self._name}.{field_name} is not writable by you, so a mark on "
+                "it cannot be resolved."
+            )
+        return True
+
+    def markup_can_resolve(self, field_name=None):
+        """The same gate asked as a question, for a surface deciding what to offer."""
+        self.ensure_one()
+        try:
+            return bool(self._markup_can_resolve(field_name))
         except AccessError:
             return False
 
@@ -122,7 +149,7 @@ class MarkupMixin(models.AbstractModel):
         """
         self.ensure_one()
         self._markup_check_field(field_name)
-        self._markup_can_comment()
+        self._markup_can_comment(field_name)
         text = self.markup_text(field_name)
         values = dict(values or {})
         seen = {key: values.pop(key, None) for key in ("quote", "prefix", "suffix")}
@@ -171,9 +198,9 @@ class MarkupMixin(models.AbstractModel):
         if not mark.exists() or mark.res_model != self._name or mark.res_id != self.id:
             raise UserError("That mark is not on this record.")
         if state == "accepted":
-            self.check_access("write")
+            self._markup_can_resolve(mark.field_name)
         elif mark.author_id != self.env.user.partner_id:
-            self.check_access("write")
+            self._markup_can_resolve(mark.field_name)
         if mark.state != "open":
             raise UserError(f"That mark is already {mark.state}.")
 

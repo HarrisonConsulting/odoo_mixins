@@ -46,8 +46,8 @@ class MarkupTransport(http.Controller):
             return {
                 "marks": record.markup_marks(field_name, tuple(states or ())),
                 "text": record.markup_text(field_name) if field_name else None,
-                "can_comment": record.markup_can_comment(),
-                "can_resolve": record.has_access("write"),
+                "can_comment": record.markup_can_comment(field_name),
+                "can_resolve": record.markup_can_resolve(field_name),
                 "can_ask_agent": record.markup_can_ask_agent(),
             }
         except (AccessError, UserError) as error:
