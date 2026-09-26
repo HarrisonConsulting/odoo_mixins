@@ -52,6 +52,14 @@ class MarkupMark(models.Model):
         "CHECK (start_pos >= 0 AND end_pos >= start_pos)",
         "A mark ends where it starts or after it, never before.",
     )
+    _check_score_range = models.Constraint(
+        "CHECK (score IS NULL OR (score >= 0 AND score <= 1))",
+        "An assessment scores between 0 and 1.",
+    )
+    _check_score_is_an_assessment = models.Constraint(
+        "CHECK (score IS NULL OR motivation = 'assessing')",
+        "Only an assessment carries a score.",
+    )
 
     # ── what it marks ────────────────────────────────────────────────────────
     res_model = fields.Char(
@@ -104,6 +112,12 @@ class MarkupMark(models.Model):
         [("developmental", "Developmental"), ("line", "Line"),
          ("copy", "Copy"), ("proof", "Proof")],
         help="Depth of the note, so a writer can take the structural ones first.",
+    )
+    score = fields.Float(
+        help="How well the passage does, from 0 (not at all) to 1 (fully), for an "
+        "assessment. Empty in the database on every other kind of mark and on an "
+        "assessment that says what it thinks in words only; the ORM reads empty "
+        "as 0, so whether a score was given is known from the write that gave it.",
     )
 
     # ── how it was made ──────────────────────────────────────────────────────
@@ -222,6 +236,7 @@ class MarkupMark(models.Model):
             "end": mark.end_pos,
             "body": mark.body or "",
             "level": mark.editorial_level or "",
+            "score": mark.score if mark.motivation == "assessing" else None,
             "gesture": mark.gesture or "",
             "ink": mark.ink or None,
             "state": mark.state,

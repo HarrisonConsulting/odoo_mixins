@@ -4,3 +4,4 @@ from . import test_mark_create_guard
 from . import test_mark_listing
 from . import test_redline
 from . import test_splice
+from . import test_mark_score

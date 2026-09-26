@@ -1,6 +1,6 @@
 {
     "name": "Field Diff Tracking",
-    "version": "19.0.2.1.6",
+    "version": "19.0.2.1.7",
     "summary": "Redlines in the chatter, and marks on the passages people argue with",
     "sequence": 0,
     "description": """
