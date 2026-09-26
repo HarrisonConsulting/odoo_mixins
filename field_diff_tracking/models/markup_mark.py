@@ -1,5 +1,6 @@
 from odoo import api, fields, models
 from odoo.exceptions import ValidationError
+from odoo.fields import Domain
 
 from ..tools import anchor
 
@@ -11,6 +12,20 @@ MOTIVATIONS = [
     ("assessing", "Assessment"),
     ("replying", "Reply"),
 ]
+
+STATES = [
+    ("open", "Open"), ("accepted", "Accepted"), ("rejected", "Rejected"),
+    ("superseded", "Superseded"), ("orphaned", "Orphaned"),
+]
+
+# A mark still waiting on somebody, against one that is settled either way.
+PHASES = {
+    "open": ("open", "orphaned"),
+    "settled": ("accepted", "rejected", "superseded"),
+}
+
+# The most rows one listing call answers, whatever it asks for.
+LISTING_CAP = 100
 
 
 class MarkupMark(models.Model):
@@ -116,9 +131,7 @@ class MarkupMark(models.Model):
 
     # ── where it stands ──────────────────────────────────────────────────────
     state = fields.Selection(
-        [("open", "Open"), ("accepted", "Accepted"), ("rejected", "Rejected"),
-         ("superseded", "Superseded"), ("orphaned", "Orphaned")],
-        default="open", required=True, index=True,
+        STATES, default="open", required=True, index=True,
         help="Orphaned means the passage it marked is gone: the mark is kept and "
         "listed rather than deleted, because a lost note is worse than a stale one.",
     )
@@ -218,3 +231,132 @@ class MarkupMark(models.Model):
             "version_ref": mark.version_ref or "",
             "parent_id": mark.parent_id.id or None,
         } for mark in self]
+
+    # ── listing across records ───────────────────────────────────────────────
+    @api.model
+    def _markable_models(self):
+        """Models that carry marks and that the caller may read at all.
+
+        Membership is the registry's answer, never a name a caller supplied —
+        the same closed set the per-record routes use.
+        """
+        registry = self.env.registry
+        mixin = registry["markup.mixin"]
+        return sorted(
+            name for name, cls in registry.items()
+            if name != "markup.mixin" and not cls._abstract and issubclass(cls, mixin)
+            and self.env[name].browse().has_access("read")
+        )
+
+    @api.model
+    def _readable_domain(self, filters=None):
+        """Top-level marks matching ``filters`` whose host the caller may read.
+
+        ``markup.mark`` stays closed: the marks are searched as the system, and
+        every candidate host is passed through the caller's own
+        ``_filtered_access('read')``, one query per model. A mark on a record the
+        caller cannot open is never in the result, however it is asked for.
+        """
+        filters = filters or {}
+        models = self._markable_models()
+        if filters.get("model"):
+            models = [name for name in models if name == filters["model"]]
+        domain = Domain("res_model", "in", models) & Domain("parent_id", "=", False)
+        if filters.get("phase") in PHASES:
+            domain &= Domain("state", "in", PHASES[filters["phase"]])
+        states = [state for state in filters.get("states") or () if state in dict(STATES)]
+        if states:
+            domain &= Domain("state", "in", states)
+        if filters.get("author_kind") in ("human", "agent"):
+            domain &= Domain("author_kind", "=", filters["author_kind"])
+        if isinstance(filters.get("author_id"), int):
+            domain &= Domain("author_id", "=", filters["author_id"])
+        if filters.get("motivation") in dict(MOTIVATIONS):
+            domain &= Domain("motivation", "=", filters["motivation"])
+        if filters.get("level") in dict(self._fields["editorial_level"].selection):
+            domain &= Domain("editorial_level", "=", filters["level"])
+        readable = []
+        for model, res_ids in self.sudo()._read_group(
+            domain, groupby=["res_model"], aggregates=["res_id:array_agg_distinct"],
+        ):
+            hosts = self.env[model].browse(res_ids).exists()._filtered_access("read")
+            if hosts:
+                readable.append(Domain("res_model", "=", model) & Domain("res_id", "in", hosts.ids))
+        return domain & Domain.OR(readable) if readable else Domain.FALSE
+
+    @api.model
+    def _readable_listing(self, filters=None, limit=50, offset=0):
+        """One page of the marks the caller may read, newest first, across records.
+
+        Each row is :meth:`to_dict` plus where the mark lives: the host's model
+        and label, the field's label, a URL that opens the host on the mark,
+        and whether it is still open. ``limit`` is clamped to ``LISTING_CAP``.
+        """
+        limit = max(1, min(int(limit or 1), LISTING_CAP))
+        offset = max(0, int(offset or 0))
+        domain = self._readable_domain(filters)
+        marks = self.sudo().search(domain, order="write_date desc, id desc", limit=limit, offset=offset)
+        return {
+            "rows": marks._listing_rows(),
+            "total": self.sudo().search_count(domain),
+            **self._listing_facets(filters),
+        }
+
+    @api.model
+    def _listing_facets(self, filters=None):
+        """What a reader can filter by: authors of readable marks, and the models.
+
+        Authors are counted without the author filter itself, so choosing one
+        does not empty the list of the others.
+        """
+        unfiltered = {key: value for key, value in (filters or {}).items() if key != "author_id"}
+        return {
+            "authors": [
+                {"id": author.id, "name": author.display_name}
+                for author, in self.sudo()._read_group(
+                    self._readable_domain(unfiltered), groupby=["author_id"], limit=LISTING_CAP,
+                )
+            ],
+            "models": [
+                {"model": name, "name": self.env[name]._description}
+                for name in self._markable_models()
+            ],
+        }
+
+    def _listing_rows(self):
+        """The drawer's shape for marks already known to sit on readable hosts."""
+        marks = self.sudo()
+        replies = dict(marks._read_group(
+            [("parent_id", "in", self.ids)], groupby=["parent_id"], aggregates=["__count"],
+        ))
+        hosts = {}
+        for mark in marks:
+            hosts.setdefault(mark.res_model, set()).add(mark.res_id)
+        # Labels are read as the caller, whose access admitted these hosts.
+        caller = self.sudo(False).env
+        labels = {
+            (model, host.id): host.display_name
+            for model, ids in hosts.items()
+            for host in caller[model].browse(ids)
+        }
+        rows = []
+        for mark, row in zip(marks, marks.to_dict()):
+            host_model = self.env[mark.res_model]
+            field = host_model._fields.get(mark.field_name)
+            rows.append({
+                **row,
+                "kind": "text",
+                "phase": "settled" if mark.state in PHASES["settled"] else "open",
+                "model": mark.res_model,
+                "model_name": host_model._description,
+                "res_id": mark.res_id,
+                "record": labels[(mark.res_model, mark.res_id)],
+                "record_model": mark.res_model,
+                "record_id": mark.res_id,
+                "field_label": field.string if field else mark.field_name,
+                "author_id": mark.author_id.id,
+                "reply_count": replies.get(mark, 0),
+                "date": mark.write_date.isoformat(),
+                "url": f"/odoo/{mark.res_model}/{mark.res_id}?mark={mark.id}",
+            })
+        return rows
