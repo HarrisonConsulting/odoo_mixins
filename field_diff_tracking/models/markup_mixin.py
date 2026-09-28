@@ -165,9 +165,30 @@ class MarkupMixin(models.AbstractModel):
         self._markup_can_comment(field_name)
         text = self.markup_text(field_name)
         values = dict(values or {})
+        parent = self.env['markup.mark']
+        if values.get('motivation') == 'replying':
+            parent_id = values.get('parent_id')
+            if type(parent_id) is not int or parent_id <= 0:
+                raise UserError('A reply needs a mark on this passage.')
+            # The host and field were admitted above. A client-supplied parent
+            # is only a lookup key within that exact admitted scope, never a
+            # grant to another record or to another field on this record.
+            parent = self.env['markup.mark'].sudo().search([
+                ('id', '=', parent_id), ('res_model', '=', self._name),
+                ('res_id', '=', self.id), ('field_name', '=', field_name),
+            ], limit=1)
+            if not parent:
+                raise UserError('That mark does not belong to this passage.')
+            if parent.parent_id:
+                raise UserError('Reply to the original mark, not to another reply.')
+            if not isinstance(values.get('body'), str) or not values['body'].strip():
+                raise UserError('A reply needs a message.')
         seen = {key: values.pop(key, None) for key in ("quote", "prefix", "suffix")}
-        selector = anchor.selector(text, start, end)
-        if seen["quote"] is not None and seen["quote"] != selector["quote"]:
+        # Replies discuss the original reading even after an accepted edit has
+        # removed its words. Preserve that reading instead of reanchoring the
+        # reply onto unrelated current text or trusting submitted offsets.
+        selector = {key: parent[key] for key in ('quote', 'prefix', 'suffix', 'start_pos', 'end_pos')} if parent else anchor.selector(text, start, end)
+        if not parent and seen["quote"] is not None and seen["quote"] != selector["quote"]:
             placed = anchor.resolve(
                 text, seen["quote"], seen["prefix"] or "", seen["suffix"] or "", start
             )
@@ -186,7 +207,7 @@ class MarkupMixin(models.AbstractModel):
             "res_model": self._name,
             "res_id": self.id,
             "field_name": field_name,
-            "version_ref": self._markup_version_ref(field_name),
+            "version_ref": parent.version_ref if parent else self._markup_version_ref(field_name),
             # Said here rather than left to the field's default. `sudo()` bypasses
             # access checks without changing who the user is, so the default names
             # the right partner today — but authorship is the one column a reader
@@ -197,6 +218,7 @@ class MarkupMixin(models.AbstractModel):
             "author_id": self.env.user.partner_id.id,
             "author_kind": "human",
             "state": "open",
+            "parent_id": parent.id if parent else False,
             **selector,
         }
         mark = self.env["markup.mark"].sudo().create(mark_values)
