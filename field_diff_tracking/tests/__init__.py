@@ -5,3 +5,5 @@ from . import test_mark_listing
 from . import test_redline
 from . import test_splice
 from . import test_mark_score
+
+from . import test_markup_drawing

@@ -85,3 +85,17 @@ class MarkupTransport(http.Controller):
             return {"mark": record.markup_resolve(int(mark_id), state, body)}
         except (AccessError, UserError) as error:
             return {"error": "refused", "message": str(error)}
+
+    @http.route("/markup/drawing", type="jsonrpc", auth="user")
+    def drawing(self, model, res_id, field_name, data, mark_id=None,
+                revision=0, mode="inline", bounds=None, session_id=None):
+        """Persist drawing content through the same host gate as text marks."""
+        record = _markable(model, res_id)
+        if record is None:
+            return {"error": "not_found"}
+        try:
+            return {"mark": record.markup_drawing(
+                field_name, data, mark_id, revision, mode, bounds, session_id,
+            )}
+        except (AccessError, UserError) as error:
+            return {"error": "refused", "message": str(error)}

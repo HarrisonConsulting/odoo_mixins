@@ -239,6 +239,7 @@ class MarkupMark(models.Model):
             "score": mark.score if mark.motivation == "assessing" else None,
             "gesture": mark.gesture or "",
             "ink": mark.ink or None,
+            "can_edit_ink": mark.author_id == self.env.user.partner_id and mark.state == "open",
             "state": mark.state,
             "anchored_by": mark.anchored_by or "",
             "author": mark.author_id.display_name,

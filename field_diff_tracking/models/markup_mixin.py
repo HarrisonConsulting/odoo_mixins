@@ -1,3 +1,5 @@
+import json
+
 from collections import defaultdict
 
 from odoo import api, fields, models
@@ -200,6 +202,69 @@ class MarkupMixin(models.AbstractModel):
             **selector,
         }
         mark = self.env["markup.mark"].sudo().create(mark_values)
+        return mark.to_dict()[0]
+
+    def markup_drawing(self, field_name, data, mark_id=None, revision=0,
+                       mode="inline", bounds=None, session_id=None):
+        """Save an editable canvas under the marked host's admission boundary."""
+        self.ensure_one()
+        self._markup_check_field(field_name)
+        self._markup_can_comment(field_name)
+        if mode not in ("inline", "redline") or not isinstance(data, dict):
+            raise UserError("A drawing needs canvas data and an inline or redline placement.")
+        if not isinstance(data.get("layers"), list) or not isinstance(data.get("viewport"), dict):
+            raise UserError("The drawing is missing its layers or viewport.")
+        try:
+            encoded = json.dumps(data, allow_nan=False)
+        except (ValueError, TypeError) as error:
+            raise UserError("The drawing contains invalid data.") from error
+        if len(encoded.encode()) > 2 * 1024 * 1024:
+            raise UserError("This drawing exceeds the 2 MiB markup limit.")
+        bounds = bounds or {}
+        if any(not isinstance(bounds.get(key), (int, float)) or
+               not 0 < bounds[key] < 1000000 for key in ("width", "height")):
+            raise UserError("A drawing needs valid region dimensions.")
+        scope = bounds.get("scope")
+        if scope is not None and (not isinstance(scope, str) or len(scope) > 100):
+            raise UserError("A drawing needs a valid region scope.")
+        if not isinstance(session_id, str) or len(session_id) > 100:
+            raise UserError("A drawing needs a valid markup session.")
+        mark = self.env["markup.mark"].sudo().browse(mark_id).exists() if mark_id else None
+        if mark_id:
+            if not mark or (mark.res_model, mark.res_id, mark.field_name) != (self._name, self.id, field_name):
+                raise UserError("That drawing is not on this region.")
+            if mark.author_id != self.env.user.partner_id:
+                raise AccessError("Only the drawing's author may revise it.")
+            # Serialize revision checks as well as writes. Invalidating after the
+            # row lock prevents a previously cached value passing a stale check.
+            self.env.cr.execute("SELECT id FROM markup_mark WHERE id = %s FOR UPDATE", [mark.id])
+            mark.invalidate_recordset(["ink", "state"])
+            previous = mark.ink or {}
+            if previous.get("schema") != "gdo.markup-canvas/1" or mark.state != "open":
+                raise UserError("That drawing is no longer editable.")
+            if revision != previous.get("revision"):
+                raise UserError("This drawing changed elsewhere. Reload before saving.")
+            if mode != previous.get("mode"):
+                raise UserError("A drawing's placement cannot change while revising it.")
+        else:
+            if revision != 0:
+                raise UserError("A new drawing starts at revision zero.")
+            previous = {}
+        ink = {
+            "schema": "gdo.markup-canvas/1", "mode": mode,
+            "revision": revision + 1, "data": data,
+            "bounds": {"width": bounds["width"], "height": bounds["height"], "scope": scope},
+            "session": previous.get("session") or session_id,
+        }
+        if mark:
+            mark.write({"ink": ink})
+        else:
+            text = self.markup_text(field_name)
+            created = self.markup_add(field_name, 0, len(text), {
+                "motivation": "commenting", "body": "Canvas" if mode == "inline" else "Region redline",
+                "ink": ink,
+            })
+            mark = self.env["markup.mark"].sudo().browse(created["id"])
         return mark.to_dict()[0]
 
     def markup_resolve(self, mark_id, state, body=None):
