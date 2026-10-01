@@ -44,5 +44,7 @@ class TestMarkupDrawing(MarkablePartnerCase):
         with self.assertRaises(UserError):
             self.host.markup_drawing("comment", {**self.data, "layers": [None]}, **self.options)
         with self.assertRaises(UserError):
+            self.host.markup_drawing("comment", {**self.data, "groups": "invalid"}, **self.options)
+        with self.assertRaises(UserError):
             self.host.markup_drawing("comment", {**self.data, "viewport": {"tx": 0, "ty": 0, "scale": 0}}, **self.options)
         self.assertFalse(self.host.markup_marks("comment"))

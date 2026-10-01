@@ -217,11 +217,22 @@ class MarkupMixin(models.AbstractModel):
         viewport = data["viewport"]
         if any(type(viewport.get(key)) not in (int, float) for key in ("tx", "ty", "scale")) or viewport["scale"] <= 0:
             raise UserError("The drawing has an invalid viewport.")
+        groups = data.get("groups", [])
+        if not isinstance(groups, list) or any(
+            not isinstance(group, dict) or not isinstance(group.get("memberIds", []), list)
+            for group in groups
+        ):
+            raise UserError("The drawing has invalid groups.")
         for layer in data["layers"]:
             if not isinstance(layer, dict) or not isinstance(layer.get("strokes"), list):
                 raise UserError("The drawing has an invalid layer.")
             if any(not isinstance(stroke, dict) for stroke in layer["strokes"]):
                 raise UserError("The drawing has an invalid stroke.")
+            if any("points" in stroke and (
+                not isinstance(stroke["points"], list) or
+                any(not isinstance(point, dict) for point in stroke["points"])
+            ) for stroke in layer["strokes"]):
+                raise UserError("The drawing has invalid stroke points.")
         if type(revision) is not int or revision < 0:
             raise UserError("A drawing needs a valid revision.")
         try:
