@@ -1,7 +1,6 @@
 """Drawing saves inherit host admission and compare revisions before writing."""
 from odoo.exceptions import AccessError, UserError
 from odoo.tests import tagged
-from odoo.tests.common import new_test_user
 from .common import MarkablePartnerCase
 
 
@@ -31,7 +30,10 @@ class TestMarkupDrawing(MarkablePartnerCase):
         user = self.env.ref("base.public_user")
         with self.assertRaises(AccessError):
             self.host.with_user(user).markup_drawing("comment", self.data, drawing["id"], 1, **self.options)
-        reviewer = new_test_user(self.env, login="markup-drawing-reviewer")
+        # An existing second user avoids unrelated signup/federation hooks in
+        # full installations. Even an administrator cannot rewrite another author.
+        reviewer = self.env.ref("base.user_admin")
+        self.assertNotEqual(reviewer, self.env.user)
         self.assertTrue(self.host.with_user(reviewer).markup_can_comment("comment"))
         self.assertFalse(self.host.with_user(reviewer).markup_marks("comment")[0]["can_edit_ink"])
         with self.assertRaises(AccessError):
