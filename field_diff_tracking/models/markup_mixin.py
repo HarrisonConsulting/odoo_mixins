@@ -214,6 +214,16 @@ class MarkupMixin(models.AbstractModel):
             raise UserError("A drawing needs canvas data and an inline or redline placement.")
         if not isinstance(data.get("layers"), list) or not isinstance(data.get("viewport"), dict):
             raise UserError("The drawing is missing its layers or viewport.")
+        viewport = data["viewport"]
+        if any(type(viewport.get(key)) not in (int, float) for key in ("tx", "ty", "scale")) or viewport["scale"] <= 0:
+            raise UserError("The drawing has an invalid viewport.")
+        for layer in data["layers"]:
+            if not isinstance(layer, dict) or not isinstance(layer.get("strokes"), list):
+                raise UserError("The drawing has an invalid layer.")
+            if any(not isinstance(stroke, dict) for stroke in layer["strokes"]):
+                raise UserError("The drawing has an invalid stroke.")
+        if type(revision) is not int or revision < 0:
+            raise UserError("A drawing needs a valid revision.")
         try:
             encoded = json.dumps(data, allow_nan=False)
         except (ValueError, TypeError) as error:
@@ -221,7 +231,7 @@ class MarkupMixin(models.AbstractModel):
         if len(encoded.encode()) > 2 * 1024 * 1024:
             raise UserError("This drawing exceeds the 2 MiB markup limit.")
         bounds = bounds or {}
-        if any(not isinstance(bounds.get(key), (int, float)) or
+        if not isinstance(bounds, dict) or any(type(bounds.get(key)) not in (int, float) or
                not 0 < bounds[key] < 1000000 for key in ("width", "height")):
             raise UserError("A drawing needs valid region dimensions.")
         scope = bounds.get("scope")
