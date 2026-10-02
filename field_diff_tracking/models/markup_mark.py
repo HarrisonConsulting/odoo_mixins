@@ -240,6 +240,9 @@ class MarkupMark(models.Model):
             "gesture": mark.gesture or "",
             "ink": mark.ink or None,
             "can_edit_ink": mark.author_id == self.env.user.partner_id and mark.state == "open",
+            # Native markup_resolve already admits the author to reject an
+            # open mark without host edit rights. This is its UI projection.
+            "can_withdraw": mark.author_id == self.env.user.partner_id and mark.state == "open",
             "state": mark.state,
             "anchored_by": mark.anchored_by or "",
             "author": mark.author_id.display_name,
