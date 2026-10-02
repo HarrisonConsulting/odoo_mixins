@@ -7,3 +7,4 @@ from . import test_splice
 from . import test_mark_score
 
 from . import test_markup_drawing
+from . import test_markup_surface

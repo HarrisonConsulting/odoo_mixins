@@ -15,13 +15,13 @@ MOTIVATIONS = [
 
 STATES = [
     ("open", "Open"), ("accepted", "Accepted"), ("rejected", "Rejected"),
-    ("superseded", "Superseded"), ("orphaned", "Orphaned"),
+    ("superseded", "Superseded"), ("orphaned", "Orphaned"), ("withdrawn", "Withdrawn"),
 ]
 
 # A mark still waiting on somebody, against one that is settled either way.
 PHASES = {
     "open": ("open", "orphaned"),
-    "settled": ("accepted", "rejected", "superseded"),
+    "settled": ("accepted", "rejected", "superseded", "withdrawn"),
 }
 
 # The most rows one listing call answers, whatever it asks for.

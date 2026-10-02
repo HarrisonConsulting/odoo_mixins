@@ -1,4 +1,5 @@
 import json
+import math
 
 from collections import defaultdict
 
@@ -248,6 +249,45 @@ class MarkupMixin(models.AbstractModel):
         scope = bounds.get("scope")
         if scope is not None and (not isinstance(scope, str) or len(scope) > 100):
             raise UserError("A drawing needs a valid region scope.")
+        passage = bounds.get('anchor')
+        if passage is not None:
+            keys = {'target', 'start', 'end', 'quote', 'prefix', 'suffix', 'geometry'}
+            if not isinstance(passage, dict) or set(passage) != keys:
+                raise UserError('A drawing needs an exact passage anchor.')
+            target = passage['target']
+            if target != {'model': self._name, 'resId': self.id, 'field': field_name}:
+                raise UserError('The drawing anchor belongs to another source.')
+            start, end = passage['start'], passage['end']
+            if type(start) is not int or type(end) is not int or not 0 <= start <= end:
+                raise UserError('The drawing passage offsets are invalid.')
+            if any(not isinstance(passage[key], str) for key in ('quote', 'prefix', 'suffix')) or any(
+                len(passage[key]) > 64 for key in ('prefix', 'suffix')
+            ):
+                raise UserError('The drawing passage context is invalid.')
+            geometry = passage['geometry']
+            finite = lambda value: type(value) in (int, float) and math.isfinite(value)
+            if not isinstance(geometry, dict) or set(geometry) != {'width', 'height', 'fragments'} or any(
+                not finite(geometry.get(key)) or geometry[key] != bounds[key]
+                for key in ('width', 'height')
+            ):
+                raise UserError('The drawing geometry does not match its frame.')
+            fragments = geometry['fragments']
+            if not isinstance(fragments, list) or not 1 <= len(fragments) <= 4096:
+                raise UserError('The drawing needs bounded passage geometry.')
+            for fragment in fragments:
+                if not isinstance(fragment, dict) or set(fragment) != {'x', 'y', 'width', 'height'} or any(
+                    not finite(fragment.get(key)) for key in ('x', 'y', 'width', 'height')
+                ) or min(fragment['x'], fragment['y']) < -1 or min(fragment['width'], fragment['height']) <= 0 or (
+                    fragment['x'] + fragment['width'] > bounds['width'] + 1 or
+                    fragment['y'] + fragment['height'] > bounds['height'] + 1
+                ):
+                    raise UserError('The drawing passage geometry is invalid.')
+            if not mark_id:
+                current = self.markup_text(field_name)
+                if end > len(current) or current[start:end] != passage['quote'] or (
+                    passage['prefix'] and not current[:start].endswith(passage['prefix'])
+                ) or (passage['suffix'] and not current[end:].startswith(passage['suffix'])):
+                    raise UserError('This drawing passage changed. Reload before drawing.')
         if not isinstance(session_id, str) or len(session_id) > 100:
             raise UserError("A drawing needs a valid markup session.")
         mark = self.env["markup.mark"].sudo().browse(mark_id).exists() if mark_id else None
@@ -267,6 +307,8 @@ class MarkupMixin(models.AbstractModel):
                 raise UserError("This drawing changed elsewhere. Reload before saving.")
             if mode != previous.get("mode"):
                 raise UserError("A drawing's placement cannot change while revising it.")
+            if passage != (previous.get('bounds') or {}).get('anchor'):
+                raise UserError("A drawing's captured passage cannot change while revising it.")
         else:
             if revision != 0:
                 raise UserError("A new drawing starts at revision zero.")
@@ -277,11 +319,14 @@ class MarkupMixin(models.AbstractModel):
             "bounds": {"width": bounds["width"], "height": bounds["height"], "scope": scope},
             "session": previous.get("session") or session_id,
         }
+        if passage is not None:
+            ink['bounds']['anchor'] = passage
         if mark:
             mark.write({"ink": ink})
         else:
             text = self.markup_text(field_name)
-            created = self.markup_add(field_name, 0, len(text), {
+            created = self.markup_add(field_name, passage['start'] if passage else 0,
+                                     passage['end'] if passage else len(text), {
                 "motivation": "commenting", "body": "Canvas" if mode == "inline" else "Region redline",
                 "ink": ink,
             })
