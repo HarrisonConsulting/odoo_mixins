@@ -241,3 +241,22 @@ class TestMarkupSurfaceCommands(MarkablePartnerCase):
         self.assertEqual(len(self.host.markup_marks('comment')), 2)
         self.assertFalse(self.host.markup_surface_capabilities('comment')['merge'])
         self.assertFalse(self.host.markup_units('comment')['units'])
+
+    def test_rpc_context_cannot_skip_reanchor_or_preserve_source_marks(self):
+        mark = self._mark()
+        self.host.with_context(markup_skip_reanchor=True, markup_preserve_source_marks=True).write({
+            'comment': '<p>Entirely unrelated words.</p>'})
+        record = self.env['markup.mark'].sudo().browse(mark['id'])
+        self.assertEqual(record.state, 'orphaned')
+
+    def test_private_source_writer_preserves_original_selector_without_native_version_provider(self):
+        from odoo.addons.field_diff_tracking.models.markup_mixin import SOURCE_WRITE_AUTHORITY
+        mark = self._mark()
+        record = self.env['markup.mark'].sudo().browse(mark['id'])
+        original = record.read(['start_pos', 'end_pos', 'prefix', 'suffix', 'state', 'quote'])
+        self.host.with_context(markup_preserve_source_marks=SOURCE_WRITE_AUTHORITY,
+            markup_preserve_source_fields=['comment']).write({'comment': '<p>Different private source.</p>'})
+        self.assertEqual(record.read(['start_pos', 'end_pos', 'prefix', 'suffix', 'state', 'quote']), original)
+        self.assertFalse(self.host.markup_surface_capabilities('comment')['fork'])
+        with self.assertRaises(UserError):
+            self.host.markup_editor_fork('comment', 'Unknown branch', self._revision(), 'unknown-fork-operation', {'store': 'typed', 'id': 1})

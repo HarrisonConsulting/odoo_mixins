@@ -12,6 +12,9 @@ from ..tools.splice import splice_html
 
 # The only keys a caller may set on a mark: what it wants to say, never what
 # the mark points at or who said it.
+# Only native Python source writers can preserve branch selectors.
+SOURCE_WRITE_AUTHORITY = object()
+
 MARK_CLIENT_FIELDS = ("motivation", "body", "editorial_level", "ink", "gesture", "score")
 
 
@@ -142,6 +145,10 @@ class MarkupMixin(models.AbstractModel):
             return False
 
     # ── reading ──────────────────────────────────────────────────────────────
+    def _markup_current_marks(self, field_name, marks):
+        """Versioned owners narrow current paint without hiding history detail."""
+        return marks
+
     def markup_marks(self, field_name=None, states=("open",)):
         """Marks on this record, for whoever may read the record itself."""
         self.ensure_one()
@@ -152,7 +159,7 @@ class MarkupMixin(models.AbstractModel):
             domain.append(("field_name", "=", field_name))
         if states:
             domain.append(("state", "in", list(states)))
-        return self.env["markup.mark"].sudo().search(domain).to_dict()
+        return self._markup_current_marks(field_name, self.env["markup.mark"].sudo().search(domain)).to_dict()
 
     # ── writing ──────────────────────────────────────────────────────────────
     def markup_add(self, field_name, start, end, values=None):
@@ -439,6 +446,10 @@ class MarkupMixin(models.AbstractModel):
         return False
 
     # ── keeping marks on the passage they were made on ───────────────────────
+    def _markup_reanchor_marks(self, field_name, marks):
+        """Versioned hosts exclude immutable historical selectors here."""
+        return marks
+
     def markup_reanchor(self, field_names=None):
         """Re-place every open or orphaned mark against the text as it stands.
 
@@ -450,6 +461,9 @@ class MarkupMixin(models.AbstractModel):
         if isinstance(field_names, str):
             field_names = [field_names]
         names = list(field_names or self._markup_fields)
+        if self.env.context.get("markup_preserve_source_marks") is SOURCE_WRITE_AUTHORITY:
+            preserved = self.env.context.get("markup_preserve_source_fields")
+            names = [name for name in names if preserved is not None and name not in preserved]
         if not self.ids or not names:
             return
         marks = self.env["markup.mark"].sudo().search([
@@ -460,12 +474,13 @@ class MarkupMixin(models.AbstractModel):
         for mark in marks:
             grouped[(mark.res_id, mark.field_name)] |= mark
         for (res_id, name), group in grouped.items():
-            group._reanchor(self.browse(res_id).markup_text(name))
+            host = self.browse(res_id)
+            host._markup_reanchor_marks(name, group)._reanchor(host.markup_text(name))
 
     def write(self, vals):
         """Text that moves takes its marks with it."""
         touched = [name for name in self._markup_fields if name in vals]
         result = super().write(vals)
-        if touched and not self.env.context.get("markup_skip_reanchor"):
-            self.with_context(markup_skip_reanchor=True).markup_reanchor(touched)
+        if touched and self.env.context.get("markup_skip_reanchor") is not SOURCE_WRITE_AUTHORITY:
+            self.with_context(markup_skip_reanchor=SOURCE_WRITE_AUTHORITY).markup_reanchor(touched)
         return result

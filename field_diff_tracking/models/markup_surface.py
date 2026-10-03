@@ -94,7 +94,7 @@ class MarkupSurface(models.AbstractModel):
         self._markup_check_field(field_name)
         self._markup_can_comment(field_name)
         source = self._markup_operation_source(field_name)
-        if action in ('edit_content', 'insert_canvas') and not source.get('can_write'):
+        if action in ('edit_content', 'insert_canvas', 'fork_content') and not source.get('can_write'):
             raise AccessError('This source is no longer writable.')
         if action in ('accept', 'accept_comment', 'accept_request_change', 'rollback', 'rollback_retry', 'rollback_retry_feedback'):
             self._markup_can_resolve(field_name)
@@ -157,10 +157,17 @@ class MarkupSurface(models.AbstractModel):
     def _markup_restore_available(self, field_name):
         return False
 
+    def _markup_fork_available(self, field_name):
+        return False
+
+    def markup_editor_fork(self, field_name, value, expected_revision, operation_id, origin_selector, locator=None):
+        raise UserError('This source does not expose native version branching.')
+
     def markup_surface_capabilities(self, field_name):
         self.ensure_one()
         source = self._markup_operation_source(field_name)
         return {'accept': bool(source.get('can_write')),
+                'fork': bool(source.get('can_write')) and self._markup_fork_available(field_name),
                 'merge': self.markup_can_comment(field_name) and self._markup_unit_supported(field_name),
                 'reject': self.markup_can_comment(field_name),
                 'reset': self.markup_can_comment(field_name),
