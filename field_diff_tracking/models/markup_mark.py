@@ -1,5 +1,5 @@
 from odoo import api, fields, models
-from odoo.exceptions import ValidationError
+from odoo.exceptions import AccessError, ValidationError
 from odoo.fields import Domain
 
 from ..tools import anchor
@@ -224,8 +224,18 @@ class MarkupMark(models.Model):
 
     def to_dict(self):
         """The transport shape the markup surface reads, in browser or terminal."""
+        resolvers = {}
+        for mark in self:
+            key = (mark.res_model, mark.res_id, mark.field_name)
+            if key not in resolvers:
+                host = self.env[mark.res_model].sudo(False).browse(mark.res_id)
+                try:
+                    resolvers[key] = bool(host.exists() and host.markup_can_resolve(mark.field_name))
+                except AccessError:
+                    resolvers[key] = False
         return [{
             "id": mark.id,
+            "created": fields.Datetime.to_string(mark.create_date),
             "field": mark.field_name,
             "motivation": mark.motivation,
             "edit_kind": mark.edit_kind,
@@ -240,9 +250,9 @@ class MarkupMark(models.Model):
             "gesture": mark.gesture or "",
             "ink": mark.ink or None,
             "can_edit_ink": mark.author_id == self.env.user.partner_id and mark.state == "open",
-            # Native markup_resolve already admits the author to reject an
-            # open mark without host edit rights. This is its UI projection.
-            "can_withdraw": mark.author_id == self.env.user.partner_id and mark.state == "open",
+            # Withdrawal is neutral and admits the author or native resolver.
+            "can_withdraw": mark.state in ("open", "orphaned") and (
+                mark.author_id == self.env.user.partner_id or resolvers[(mark.res_model, mark.res_id, mark.field_name)]),
             "state": mark.state,
             "anchored_by": mark.anchored_by or "",
             "author": mark.author_id.display_name,

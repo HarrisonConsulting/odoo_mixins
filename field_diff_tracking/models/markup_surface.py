@@ -161,6 +161,7 @@ class MarkupSurface(models.AbstractModel):
         self.ensure_one()
         source = self._markup_operation_source(field_name)
         return {'accept': bool(source.get('can_write')),
+                'merge': self.markup_can_comment(field_name) and self._markup_unit_supported(field_name),
                 'reject': self.markup_can_comment(field_name),
                 'reset': self.markup_can_comment(field_name),
                 'withdraw': self.markup_can_comment(field_name),
@@ -171,6 +172,90 @@ class MarkupSurface(models.AbstractModel):
                 'agent_response': self._markup_invocation_available(),
                 'discuss': self.markup_can_comment(field_name),
                 'revision': source['revision']}
+
+    def _markup_unit_supported(self, field_name):
+        return False
+
+    def _markup_unit_version(self, field_name, mark):
+        """A host must return a validated immutable native version reference."""
+        return None
+
+    def _markup_unit_members(self, field_name, mark_ids, exact=True):
+        self.ensure_one()
+        self._markup_check_field(field_name)
+        self.markup_text(field_name)
+        if (not isinstance(mark_ids, list) or not 2 <= len(mark_ids) <= 50
+                or any(type(value) is not int or value <= 0 for value in mark_ids)
+                or len(set(mark_ids)) != len(mark_ids)):
+            raise UserError('Select two to fifty distinct saved markups.')
+        marks = self.env['markup.mark'].sudo().browse(sorted(mark_ids)).exists()
+        if len(marks) != len(mark_ids) or any(
+                (mark.res_model, mark.res_id, mark.field_name) != (self._name, self.id, field_name)
+                or mark.parent_id for mark in marks):
+            raise AccessError('All members must be admitted root markups on this exact source.')
+        if not exact:
+            return marks, None
+        versions = [self._markup_unit_version(field_name, mark) for mark in marks]
+        if not versions[0] or any(version != versions[0] for version in versions):
+            raise UserError('Merge requires exact references to the same saved source version.')
+        return marks, versions[0]
+
+    def markup_merge(self, field_name, mark_ids, expected_revision, operation_id, title=''):
+        """Group existing markups, never apply, resolve or withdraw their originals."""
+        if not isinstance(title, str) or len(title) > 200:
+            raise UserError('A work unit title is at most two hundred characters.')
+        marks, version = self._markup_unit_members(field_name, mark_ids)
+        request = {'mark_ids': sorted(mark_ids), 'title': title}
+        receipt, replay = self._markup_operation_begin(field_name, expected_revision, operation_id,
+                                                      'merge_markups', request)
+        # Recheck under the host lock, including retries after access revocation.
+        marks, current_version = self._markup_unit_members(field_name, mark_ids)
+        if current_version != version:
+            raise UserError('A selected markup changed its source version.')
+        if replay is not None:
+            return replay
+        self.env.cr.execute(SQL('SELECT id FROM markup_mark WHERE id IN %s ORDER BY id FOR UPDATE',
+                                tuple(marks.ids)))
+        marks.invalidate_recordset()
+        marks, version = self._markup_unit_members(field_name, mark_ids)
+        snapshots = marks.to_dict()
+        for snapshot in snapshots:
+            snapshot.update(snapshot=True, can_withdraw=False, can_edit_ink=False)
+        unit = {'operation_id': operation_id, 'title': title or 'Grouped markups',
+                'created': fields.Datetime.to_string(receipt.create_date),
+                'author': self.env.user.partner_id.display_name,
+                'source': {'model': self._name, 'res_id': self.id, 'field': field_name},
+                'version': version, 'mark_ids': marks.ids, 'marks': snapshots, 'can_withdraw': False}
+        return self._markup_operation_finish(receipt, field_name,
+            {'ok': True, 'unit': unit, 'message': 'Markups grouped; originals are unchanged.',
+             'refreshMarks': False})
+
+    def markup_units(self, field_name, before=None, limit=50):
+        self.ensure_one()
+        self._markup_check_field(field_name)
+        self.markup_text(field_name)
+        if type(limit) is not int or not 1 <= limit <= 50 or (before is not None and type(before) is not int):
+            raise UserError('Select a bounded work unit page.')
+        # Other actors' operation receipts remain private. Group members themselves
+        # are host-admitted, but that does not widen receipt visibility.
+        domain = [('res_model', '=', self._name), ('res_id', '=', self.id),
+                  ('field_name', '=', field_name), ('action', '=', 'merge_markups'),
+                  ('author_id', '=', self.env.user.partner_id.id)]
+        if before is not None:
+            domain.append(('id', '<', before))
+        receipts = self.env['markup.operation'].sudo().search(domain, order='id desc', limit=limit + 1)
+        units = []
+        for receipt in receipts[:limit]:
+            unit = (receipt.result_json or {}).get('unit')
+            if not unit:
+                continue
+            try:
+                _members, _version = self._markup_unit_members(field_name, unit['mark_ids'], exact=False)
+            except (AccessError, UserError):
+                continue
+            units.append(unit)
+        return {'units': units, 'more': len(receipts) > limit,
+                'next_before': receipts[limit - 1].id if len(receipts) > limit else None}
 
     def markup_action(self, field_name, action, expected_revision, operation_id,
                       mark_id=None, note=None, target_version=None, selection=None):

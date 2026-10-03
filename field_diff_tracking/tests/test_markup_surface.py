@@ -231,3 +231,13 @@ class TestMarkupSurfaceCommands(MarkablePartnerCase):
         with self.assertRaises(UserError):
             self.host.markup_drawing('comment', data, mark_id=result['id'], revision=1,
                                      bounds=mutated, session_id='anchor-session')
+
+    def test_unknown_version_marks_remain_individual_without_fake_unit(self):
+        first, second = self._mark(), self._mark()
+        count = self.env['markup.operation'].sudo().search_count([])
+        with self.assertRaises(UserError):
+            self.host.markup_merge('comment', [first['id'], second['id']], self._revision(), 'merge-unknown-version')
+        self.assertEqual(self.env['markup.operation'].sudo().search_count([]), count)
+        self.assertEqual(len(self.host.markup_marks('comment')), 2)
+        self.assertFalse(self.host.markup_surface_capabilities('comment')['merge'])
+        self.assertFalse(self.host.markup_units('comment')['units'])
