@@ -13,6 +13,7 @@ there to impose.
 The host is ``res.partner``, made markable by :class:`MarkablePartnerCase`.
 """
 from odoo.tests import tagged
+from odoo.exceptions import AccessError, UserError
 
 from .common import MarkablePartnerCase
 
@@ -85,6 +86,43 @@ class TestMarkCreateGuard(MarkablePartnerCase):
         mark = self._add({"parent_id": parent.id, "superseded_by_id": parent.id})
         self.assertFalse(mark.parent_id)
         self.assertFalse(mark.superseded_by_id)
+
+    def test_reply_keeps_the_admitted_parent_reading_and_human_author(self):
+        parent = self._add({'body': 'Explain this.'})
+        self.host.comment = '<p>The original passage has been replaced.</p>'
+        reply_id = self.host.with_user(self.member).markup_add('comment', 0, 1, {
+            'motivation': 'replying', 'parent_id': parent.id, 'body': 'Here is why.',
+            'quote': 'forged quote', 'author_id': self.victim.id, 'state': 'accepted',
+        })['id']
+        reply = self.env['markup.mark'].sudo().browse(reply_id)
+        self.assertEqual(reply.parent_id, parent)
+        self.assertEqual(reply.quote, parent.quote)
+        self.assertEqual(reply.start_pos, parent.start_pos)
+        self.assertEqual(reply.author_id, self.member.partner_id)
+        self.assertEqual(reply.state, 'open')
+        self.assertEqual(self.host.comment, '<p>The original passage has been replaced.</p>')
+
+    def test_reply_cannot_cross_record_or_field_or_nest_under_a_reply(self):
+        parent = self._add({'body': 'Original question'})
+        for key, value in [('res_id', self.victim.id), ('field_name', 'name')]:
+            foreign = self._add({'body': 'Another passage'})
+            foreign.write({key: value})
+            with self.assertRaises(UserError):
+                self._add({'motivation': 'replying', 'parent_id': foreign.id, 'body': 'No'})
+        reply = self._add({'motivation': 'replying', 'parent_id': parent.id, 'body': 'A reply'})
+        with self.assertRaises(UserError):
+            self._add({'motivation': 'replying', 'parent_id': reply.id, 'body': 'Nested'})
+
+    def test_reply_requires_an_admitted_host_a_parent_and_a_message(self):
+        parent = self._add({'body': 'Question'})
+        for values in [{'parent_id': parent.id, 'body': ' '}, {'body': 'No parent'},
+                       {'parent_id': True, 'body': 'Invalid'}, {'parent_id': -1, 'body': 'Invalid'}]:
+            with self.assertRaises(UserError):
+                self._add({'motivation': 'replying', **values})
+        with self.assertRaises(AccessError):
+            self.host.with_user(self.env.ref('base.public_user')).markup_add('comment', 0, 1, {
+                'motivation': 'replying', 'parent_id': parent.id, 'body': 'Not admitted',
+            })
 
     def test_a_caller_cannot_place_a_mark_off_the_passage_it_marked(self):
         """Offsets are measured against the text the server read.
